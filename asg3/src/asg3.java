@@ -166,7 +166,8 @@ public class asg3
 				if(bookFlag.equals("y")) {
 					insertToBook(upc);
 				}
-			
+				
+				System.out.println("Insertion has been successful!");
 				// commit work 
 				con.commit();
 			}
@@ -226,6 +227,11 @@ public class asg3
 		ps.setString(4, taxable);
 		
 		ps.executeUpdate();
+		System.out.println("Have successfully added item!!" + 
+							"\nupc: " + upc +
+							"\nSelling Price: " + sellingPrice +
+							"\nStock: " + stock +
+							"\nTaxable?: " + taxable);
 		ps.close();
 	}
 
@@ -253,6 +259,11 @@ public class asg3
 		psBook.setString(4, textbookFlag);
 		
 		psBook.executeUpdate();
+		System.out.println("Have successfully added book!!" + 
+				"\nupc: " + upc +
+				"\nTitle: " + title +
+				"\nPublisher: " + publisher +
+				"\nTextbook?: " + textbookFlag);
 		psBook.close();
 	}
 
@@ -282,27 +293,32 @@ public class asg3
 			System.out.print("\nItem upc: ");
 			upc = in.readLine();
 
-			if(checkStock(upc)) {
-				// Check itemPurchase table for the existing upc and delete if upc present
-				if(checkTable(upc, "itemPurchase")) {
-					deleteFromTable(upc, "itemPurchase");
-				}
-
-				// Check Book table for the existing upc and delete if upc present
-				if(checkTable(upc, "book")) {
-					deleteFromTable(upc, "book");
-				}
-
-				// Delete item after checking for child constraints
-				ps = con.prepareStatement("DELETE FROM item WHERE upc = ? AND stock = 0");
-				ps.setString(1, upc);
-				ps.executeUpdate();
-				ps.close();
-				System.out.println("Successfully deleted " + upc + " from item table.");
+			if(!checkExistingItem(upc)) {
+				System.out.println("Item with given upc: " + upc + " does not exist!");
 			}
-			else
-			{
-				System.out.println("\nTransaction cancelled because : Item " + upc + " does not exist! or the stock is not at 0");
+			else {
+				if(checkStock(upc)) {
+					// Check itemPurchase table for the existing upc and delete if upc present
+					if(checkTable(upc, "itemPurchase")) {
+						deleteFromTable(upc, "itemPurchase");
+					}
+
+					// Check Book table for the existing upc and delete if upc present
+					if(checkTable(upc, "book")) {
+						deleteFromTable(upc, "book");
+					}
+
+					// Delete item after checking for child constraints
+					ps = con.prepareStatement("DELETE FROM item WHERE upc = ? AND stock = 0");
+					ps.setString(1, upc);
+					ps.executeUpdate();
+					ps.close();
+					System.out.println("Successfully deleted " + upc + " from item table.");
+				}
+				else
+				{
+					System.out.println("\nTransaction cancelled because : Item's stock is not at 0");
+				}
 			}
 			con.commit();
 		}
@@ -392,9 +408,14 @@ public class asg3
 		return false;
 	}
 
-	
 	/*
 	 * Part 3
+	 * Write a short program to print out a list of course textbooks that satisfy the following criteria: 
+	 * (i) the total number of copies sold in the last week exceeded 50; and 
+	 * (ii) the remaining stock of the textbook has fallen below 10. 
+	 * For this part of the assignment, let us assume that today’s date is November 1, 2015, 
+	 * and “last week” corresponds to the period of October 25th to October 31st. 
+	 * For your output, print out the list of course textbooks that satisfy the criteria.
 	 */ 
 	private void showTextbooks()
 	{
@@ -403,14 +424,18 @@ public class asg3
 		try
 		{
 			stmt = con.createStatement();
-			rs = stmt.executeQuery("SELECT ip.upc FROM item i, book b, purchase p, itemPurchase ip WHERE " +
-					"i.upc = b.upc AND b.upc = ip.upc AND ip.t_id = p.t_id AND i.stock < 10 AND " +
-					"p.purchaseDate >= '15-OCT-25' AND p.purchaseDate <= '15-OCT-31' AND b.flag_text = 'y'" +
-					"GROUP BY ip.upc HAVING SUM(ip.quantity) >= 50");
+			rs = stmt.executeQuery("SELECT b.upc, b.title " + 
+									"FROM book b " +
+									"WHERE b.upc IN " +
+									"(SELECT ip.upc FROM item i, book b, purchase p, itemPurchase ip WHERE " +
+									"i.upc = b.upc AND b.upc = ip.upc AND ip.t_id = p.t_id AND i.stock < 10 AND " +
+									"p.purchaseDate >= '15-OCT-25' AND p.purchaseDate <= '15-OCT-31' AND b.flag_text = 'y'" +
+									"GROUP BY ip.upc HAVING SUM(ip.quantity) >= 50)");
 
 			while(rs.next())
 			{
 				System.out.println("UPC: " + rs.getString("upc"));
+				System.out.println("Title: " + rs.getString("title"));
 			}
 
 			con.commit();
@@ -453,13 +478,17 @@ public class asg3
 								"ip.t_id = p.t_id AND ip.upc = i.upc GROUP BY ip.upc");
 			stmt.close();
 			stmt = con.createStatement();
-			rs = stmt.executeQuery("SELECT * FROM (SELECT i.upc, ir.sum, i.sellingPrice " + 
-									"FROM item i, itemRecord ir " +
-									"WHERE i.upc = ir.upc " + 
-									"ORDER BY (i.sellingPrice * ir.sum) DESC) WHERE ROWNUM <= 3");
+			rs = stmt.executeQuery("SELECT * FROM (SELECT i.upc, i.sellingPrice, i.stock, sum " + 
+									"FROM item i, " +
+									"(SELECT ip.upc as upc2, SUM(ip.quantity) as sum FROM purchase p, item i2, itemPurchase ip WHERE " +
+									"p.purchaseDate >= '15-OCT-25' AND p.purchaseDate <= '15-OCT-31' AND " +
+									"ip.t_id = p.t_id AND ip.upc = i2.upc GROUP BY ip.upc)" +
+									"WHERE i.upc = upc2 " + 
+									"ORDER BY (i.sellingPrice * sum) DESC) WHERE ROWNUM <= 3");
 			while(rs.next())
 			{
-				System.out.println("upc: " + rs.getString(1) + " sum: " + rs.getString(2)+ " price: " + rs.getString(3));
+				System.out.println("upc: " + rs.getString(1) + " sellingprice: " + rs.getString(2) + 
+						" stock: " + rs.getString(3) + " sum of quantity sold: " + rs.getString(4));
 			}
 
 			con.commit();
